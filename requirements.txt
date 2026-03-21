@@ -2,3 +2,4 @@ yfinance
 pandas-ta
 pandas
 streamlit
+altair
