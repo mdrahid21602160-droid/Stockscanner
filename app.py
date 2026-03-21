@@ -1,88 +1,81 @@
 import streamlit as st
 import yfinance as yf
-import pandas_ta as ta
 import pandas as pd
-from datetime import datetime, timedelta
+import pandas_ta as ta
+import datetime
 
-# --- PAGE CONFIG ---
-st.set_page_config(page_title="Goldilocks Scanner", layout="wide")
-st.title("🏹 Goldilocks Trading Dashboard")
-st.subheader("High-Probability Trend Scanner (Mon-Thu)")
+# --- Page Configuration ---
+st.set_page_config(page_title="Goldilocks Audit Dashboard", layout="wide")
+st.title("🏹 Goldilocks: Monthly & Yearly Audit")
 
-# --- SIDEBAR SETTINGS ---
-st.sidebar.header("Strategy Parameters")
-target_pct = st.sidebar.slider("Profit Target (%)", 0.1, 1.0, 0.3, 0.1)
-stop_loss_pct = st.sidebar.slider("Stop Loss (%)", 0.5, 3.0, 1.5, 0.1)
-lookback_days = st.sidebar.selectbox("Audit Lookback", [7, 14, 20, 30], index=2)
+# --- Sidebar Inputs ---
+st.sidebar.header("⚙️ Audit Settings")
+ticker = st.sidebar.text_input("Enter Ticker", value="NVDA").upper()
+profit_target_pct = st.sidebar.number_input("Profit Target (%)", value=0.5) / 100
+stop_loss_pct = st.sidebar.number_input("Stop Loss (%)", value=1.5) / 100
 
-TICKERS = ['AAPL', 'NVDA', 'MSFT', 'TSLA', 'AMZN', 'GOOGL', 'META', 'NFLX', 
-           'AMD', 'AVGO', 'COST', 'SMCI', 'MSTR', 'QCOM', 'ORCL', 'INTU', 
-           'ADBE', 'CRM', 'ISRG', 'MU']
+# Year and Month Selection
+current_year = datetime.datetime.now().year
+selected_year = st.sidebar.selectbox("Select Year", range(current_year, 2015, -1))
 
-# --- CORE LOGIC ---
-@st.cache_data(ttl=3600) # Cache data for 1 hour to save API hits
-def run_audit(days):
-    end_date = datetime.now()
-    start_audit = end_date - timedelta(days=days)
-    data_start = "2024-01-01"
+months = ["January", "February", "March", "April", "May", "June", 
+          "July", "August", "September", "October", "November", "December"]
+selected_month_name = st.sidebar.selectbox("Select Month", months)
+month_index = months.index(selected_month_name) + 1
+
+# --- Data Engine ---
+@st.cache_data
+def get_audit_data(symbol):
+    # Fetching extra data to ensure indicators (like EMA200) are accurate
+    data = yf.download(symbol, start="2015-01-01")
     
-    audit_results = []
+    # Calculate Indicators
+    data['EMA200'] = ta.ema(data['Close'], length=200)
+    data['RSI'] = ta.rsi(data['Close'], length=14)
+    adx_df = ta.adx(data['High'], data['Low'], data['Close'], length=14)
+    data['ADX'] = adx_df['ADX_14']
     
-    for ticker in TICKERS:
-        df = yf.download(ticker, start=data_start, end=end_date, progress=False, auto_adjust=True)
-        if df.empty: continue
-        if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    # Define Entry Signal (Goldilocks Zone)
+    data['Signal'] = (data['Close'] > data['EMA200']) & \
+                     (data['RSI'].between(40, 60)) & \
+                     (data['ADX'] > 25)
+    return data
 
-        df['EMA200'] = ta.ema(df['Close'], length=200)
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=14)
-        df['ADX'] = adx_df['ADX_14']
-        df['Gap'] = ((df['Open'] - df['Close'].shift(1)) / df['Close'].shift(1)) * 100
+# --- Processing ---
+df = get_audit_data(ticker)
 
-        subset = df.loc[start_audit:].dropna()
+# Filter by selected Year and Month
+audit_df = df[(df.index.year == selected_year) & (df.index.month == month_index)].copy()
 
-        for date, row in subset.iterrows():
-            if date.weekday() == 4: continue # Skip Fridays
-            
-            # Filters
-            is_trending = row['Close'] > row['EMA200']
-            is_rsi_valid = 40 <= row['RSI'] <= 60
-            is_strong = row['ADX'] > 25
-            is_safe_gap = row['Gap'] < 2.0
+# --- Audit Logic ---
+def run_trade_audit(row_index, full_df):
+    entry_price = full_df.iloc[row_index]['Close']
+    target = entry_price * (1 + profit_target_pct)
+    stop = entry_price * (1 - stop_loss_pct)
+    
+    # Check next 5 days for outcome
+    future_data = full_df.iloc[row_index + 1 : row_index + 6]
+    for _, day in future_data.iterrows():
+        if day['High'] >= target: return "WIN"
+        if day['Low'] <= stop: return "LOSS"
+    return "EXPIRED"
 
-            if is_trending and is_rsi_valid and is_strong and is_safe_gap:
-                hit = row['High'] >= (row['Open'] * (1 + (target_pct/100)))
-                audit_results.append({
-                    'Date': date.strftime('%Y-%m-%d'),
-                    'Ticker': ticker,
-                    'Price': f"${row['Close']:.2f}",
-                    'RSI': round(row['RSI'], 1),
-                    'ADX': round(row['ADX'], 1),
-                    'Status': "✅ WIN" if hit else "❌ FAIL"
-                })
-    return pd.DataFrame(audit_results)
-
-# --- UI EXECUTION ---
-if st.button("🚀 Run Scanner / Audit"):
-    with st.spinner("Analyzing the tape..."):
-        results_df = run_audit(lookback_days)
-        
-        if not results_df.empty:
-            # Metrics
-            total_signals = len(results_df)
-            wins = len(results_df[results_df['Status'] == "✅ WIN"])
-            win_rate = (wins / total_signals) * 100
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Signals", total_signals)
-            col2.metric("Wins", wins)
-            col3.metric("Win Rate", f"{win_rate:.1f}%")
-            
-            # Data Table
-            st.dataframe(results_df, use_container_width=True)
-            
-            # Download Button
-            csv = results_df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Report as CSV", data=csv, file_name="goldilocks_audit.csv")
-        else:
-            st.warning("No signals found for this period.")
+if not audit_df.empty:
+    # Identify signals and run audit
+    signals_indices = [df.index.get_loc(idx) for idx in audit_df[audit_df['Signal']].index]
+    results = [run_trade_audit(idx, df) for idx in signals_indices]
+    
+    # --- UI Display ---
+    col1, col2, col3 = st.columns(3)
+    win_count = results.count("WIN")
+    total_trades = len(results)
+    win_rate = (win_count / total_trades * 100) if total_trades > 0 else 0
+    
+    col1.metric("Total Signals", total_trades)
+    col2.metric("Wins", win_count)
+    col3.metric("Win Rate", f"{win_rate:.1f}%")
+    
+    st.subheader(f"Detailed Logs: {selected_month_name} {selected_year}")
+    st.write(audit_df[['Close', 'EMA200', 'RSI', 'ADX', 'Signal']])
+else:
+    st.warning(f"No data available for {selected_month_name} {selected_year}")
