@@ -4,23 +4,20 @@ import pandas_ta as ta
 import pandas as pd
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Goldilocks Global Sentinel", layout="wide")
-st.title("🏹 Goldilocks Trading: Global Sentinel Edition")
+st.set_page_config(page_title="Goldilocks S&P Top 20", layout="wide")
+st.title("🏹 Goldilocks: S&P 500 Top 20 Edition")
 
-# --- SIDEBAR: RISK CONTROLS ---
+# --- PARAMETERS ---
 st.sidebar.header("⚙️ Strategy Parameters")
-target_pct = st.sidebar.slider("Profit Target (%)", 0.1, 1.5, 0.7, 0.1)
-stop_loss_pct = st.sidebar.slider("Stop Loss (%)", 0.5, 3.0, 1.0, 0.1)
+target_pct = 0.7  # Fixed Target
+stop_loss_pct = 2.0  # Your new 2% Stop Loss
 vol_threshold = st.sidebar.slider("Min RVOL", 1.0, 2.5, 1.1, 0.1)
+slippage = 0.05 
 
-TICKERS = [
-    'AAPL', 'NVDA', 'MSFT', 'TSLA', 'AMZN', 'GOOGL', 'META', 'NFLX', 'ORCL', 'CRM', 'ADBE', 'IBM',
-    'AMD', 'AVGO', 'SMCI', 'MU', 'QCOM', 'INTC', 'ARM', 'LRCX', 'ASML', 'ADI',
-    'PYPL', 'V', 'MA', 'SQ', 'COIN', 'JPM', 'BAC', 'GS', 'MS', 'HOOD',
-    'MSTR', 'PLTR', 'SNOW', 'PATH', 'U', 'RBLX', 'SHOP', 'NET', 'TSM',
-    'COST', 'WMT', 'TGT', 'NKE', 'SBUX', 'LULU', 'CMG', 'BKNG',
-    'LLY', 'UNH', 'PFE', 'ABBV', 'MRNA', 'ISRG',
-    'XOM', 'CVX', 'CAT', 'BA', 'GE'
+# --- TOP 20 S&P 500 (By Index Weight - March 2026) ---
+TICKERS_20 = [
+    'NVDA', 'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'GOOG', 'META', 'AVGO', 'TSLA', 'BRK-B',
+    'WMT', 'LLY', 'JPM', 'XOM', 'V', 'JNJ', 'MU', 'MA', 'COST', 'ORCL'
 ]
 
 @st.cache_data(ttl=3600)
@@ -37,67 +34,28 @@ def get_market_data(ticker, start_date):
         df['Avg_Vol'] = df['Volume'].rolling(window=10).mean()
         df['RVOL'] = df['Volume'] / df['Avg_Vol']
         df['Is_Green'] = df['Close'] > df['Open']
-        df['Change_Pct'] = ((df['Close'] - df['Open']) / df['Open']) * 100
         return df
     except: return None
 
-# --- NEW: GLOBAL SENTINEL CHECK ---
-def check_global_sentinel():
-    st.subheader("🌍 Global Market Sentinel")
-    col1, col2 = st.columns(2)
-    
-    # Nikkei 225 (^N225) and FTSE 100 (^FTSE)
-    indices = {"Nikkei 225": "^N225", "FTSE 100": "^FTSE"}
-    status = True
-    
-    for (name, sym), col in zip(indices.items(), [col1, col2]):
-        idx_df = yf.download(sym, period="2d", progress=False, auto_adjust=True)
-        if not idx_df.empty:
-            if isinstance(idx_df.columns, pd.MultiIndex): idx_df.columns = idx_df.columns.get_level_values(0)
-            change = ((idx_df['Close'].iloc[-1] - idx_df['Open'].iloc[-1]) / idx_df['Open'].iloc[-1]) * 100
-            is_green = idx_df['Close'].iloc[-1] > idx_df['Open'].iloc[-1]
-            
-            color = "green" if is_green else "red"
-            icon = "✅ GO" if is_green else "❌ NO-GO"
-            col.metric(name, f"{change:.2f}%", delta=icon, delta_color="normal")
-            if not is_green: status = False
-        else:
-            col.warning(f"Could not fetch {name}")
-    return status
+tab1, tab2 = st.tabs(["🚀 Top 20 Scan", "📊 Reality Audit"])
 
-tab1, tab2, tab3 = st.tabs(["🚀 Monday Scan", "📊 Reality Audit", "📈 Compounding"])
-
-# --- TAB 1: LIVE SCANNER ---
 with tab1:
-    global_go = check_global_sentinel()
-    
-    if not global_go:
-        st.error("🚨 GLOBAL WARNING: Nikkei or FTSE is RED. Execution is high risk.")
-    
-    if st.button("🔍 Scan 60 Tickers"):
+    if st.button("🔍 Scan Top 20"):
         picks = []
-        spy = get_market_data("SPY", "2025-01-01")
-        if spy is not None and spy['Close'].iloc[-1] > spy['EMA200'].iloc[-1]:
-            for t in TICKERS:
-                df = get_market_data(t, "2025-01-01")
-                if df is not None:
-                    row = df.iloc[-1]
-                    # Original Strategy + Global Filter Logic
-                    if (row['Close'] > row['EMA200'] and 40 <= row['RSI'] <= 60 and 
-                        row['ADX'] > 25 and row['RVOL'] >= vol_threshold and row['Is_Green']):
-                        picks.append({'Ticker': t, 'ADX': round(row['ADX'],1), 'RVOL': round(row['RVOL'],2)})
-            
-            if picks:
-                st.success(f"Found {len(picks)} setups.")
-                st.dataframe(pd.DataFrame(picks).sort_values('ADX', ascending=False), use_container_width=True)
-            else: st.info("No stocks met the criteria today.")
-        else: st.error("Market Bearish: SPY < EMA200.")
+        for t in TICKERS_20:
+            df = get_market_data(t, "2025-01-01")
+            if df is not None:
+                row = df.iloc[-1]
+                if (row['Close'] > row['EMA200'] and 40 <= row['RSI'] <= 60 and 
+                    row['ADX'] > 25 and row['RVOL'] >= vol_threshold and row['Is_Green']):
+                    picks.append({'Ticker': t, 'ADX': round(row['ADX'],1), 'RVOL': round(row['RVOL'],2)})
+        if picks: st.dataframe(pd.DataFrame(picks).sort_values('ADX', ascending=False))
+        else: st.info("No Top 20 stocks met the criteria today.")
 
-# --- TAB 2: AUDIT ---
 with tab2:
-    st.header("📋 Reality Backtest")
+    st.header("📋 Audit: 0.7% Target vs 2% Stop Loss")
     c1, c2 = st.columns(2)
-    yr = c1.selectbox("Year", [2026, 2025, 2024])
+    yr = c1.selectbox("Year", [2026, 2025])
     mo = c2.selectbox("Month", ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])
     
     if st.button("📈 Run Audit"):
@@ -105,7 +63,7 @@ with tab2:
         results = []
         total_profit = 0.0
         
-        for t in TICKERS:
+        for t in TICKERS_20:
             df = get_market_data(t, f"{yr-1}-01-01")
             if df is not None:
                 m_data = df[(df.index.year == yr) & (df.index.month == m_idx)]
@@ -116,11 +74,14 @@ with tab2:
                         hit_stop = row['Low'] <= (row['Open'] * (1 - (stop_loss_pct/100)))
                         hit_target = row['High'] >= (row['Open'] * (1 + (target_pct/100)))
                         
-                        if hit_stop: p, status = -(stop_loss_pct + 0.05), "❌ STOP"
-                        elif hit_target: p, status = (target_pct - 0.05), "✅ WIN"
-                        else: 
-                            p = (((row['Close'] - row['Open']) / row['Open']) * 100) - 0.05
-                            status = "✅ CLOSE WIN" if p > 0 else "❌ CLOSE LOSS"
+                        if hit_stop:
+                            p, status = -(stop_loss_pct + slippage), "❌ STOP OUT (-2%)"
+                        elif hit_target:
+                            p, status = (target_pct - slippage), "✅ WIN (+0.7%)"
+                        else:
+                            # SELL AT CLOSE
+                            p = (((row['Close'] - row['Open']) / row['Open']) * 100) - slippage
+                            status = f"⏱️ SELL AT CLOSE ({p:.2f}%)"
                         
                         total_profit += p
                         results.append({'Date': date.date(), 'Ticker': t, 'Status': status, 'Net %': round(p, 2)})
@@ -129,11 +90,3 @@ with tab2:
             res_df = pd.DataFrame(results)
             st.metric("Total Monthly Profit", f"{total_profit:.2f}%")
             st.dataframe(res_df, use_container_width=True)
-
-# --- TAB 3: COMPOUNDING ---
-with tab3:
-    st.header("💰 20-Year Growth")
-    init = st.number_input("Starting Capital ($)", value=1000)
-    mo_avg = st.slider("Monthly Profit Avg (%)", 0.5, 20.0, 5.0)
-    final_val = init * ((1 + (mo_avg/100)) ** 240)
-    st.metric("Estimated Future Balance", f"${final_val:,.2f}")
