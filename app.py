@@ -4,17 +4,16 @@ import pandas_ta as ta
 import pandas as pd
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Goldilocks S&P Top 20", layout="wide")
-st.title("🏹 Goldilocks: S&P 500 Top 20 Edition")
+st.set_page_config(page_title="Goldilocks Top 20: Uncapped", layout="wide")
+st.title("🏹 Goldilocks: Let Profit Run (Sell at Close)")
 
 # --- PARAMETERS ---
-st.sidebar.header("⚙️ Strategy Parameters")
-target_pct = 0.7  # Fixed Target
-stop_loss_pct = 2.0  # Your new 2% Stop Loss
+st.sidebar.header("⚙️ Risk Management")
+stop_loss_pct = 2.0  # Hard Stop
 vol_threshold = st.sidebar.slider("Min RVOL", 1.0, 2.5, 1.1, 0.1)
 slippage = 0.05 
 
-# --- TOP 20 S&P 500 (By Index Weight - March 2026) ---
+# --- UPDATED TOP 20 S&P 500 (March 2026 Weights) ---
 TICKERS_20 = [
     'NVDA', 'AAPL', 'MSFT', 'AMZN', 'GOOGL', 'GOOG', 'META', 'AVGO', 'TSLA', 'BRK-B',
     'WMT', 'LLY', 'JPM', 'XOM', 'V', 'JNJ', 'MU', 'MA', 'COST', 'ORCL'
@@ -37,7 +36,7 @@ def get_market_data(ticker, start_date):
         return df
     except: return None
 
-tab1, tab2 = st.tabs(["🚀 Top 20 Scan", "📊 Reality Audit"])
+tab1, tab2 = st.tabs(["🚀 Active Scan", "📊 Reality Audit (No Target)"])
 
 with tab1:
     if st.button("🔍 Scan Top 20"):
@@ -46,14 +45,15 @@ with tab1:
             df = get_market_data(t, "2025-01-01")
             if df is not None:
                 row = df.iloc[-1]
+                # Entry Logic: Trend + Momentum + Volume
                 if (row['Close'] > row['EMA200'] and 40 <= row['RSI'] <= 60 and 
                     row['ADX'] > 25 and row['RVOL'] >= vol_threshold and row['Is_Green']):
                     picks.append({'Ticker': t, 'ADX': round(row['ADX'],1), 'RVOL': round(row['RVOL'],2)})
         if picks: st.dataframe(pd.DataFrame(picks).sort_values('ADX', ascending=False))
-        else: st.info("No Top 20 stocks met the criteria today.")
+        else: st.info("Waiting for setup on Top 20...")
 
 with tab2:
-    st.header("📋 Audit: 0.7% Target vs 2% Stop Loss")
+    st.header("📋 Audit: Uncapped Profit vs 2% Stop")
     c1, c2 = st.columns(2)
     yr = c1.selectbox("Year", [2026, 2025])
     mo = c2.selectbox("Month", ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])
@@ -61,32 +61,31 @@ with tab2:
     if st.button("📈 Run Audit"):
         m_idx = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"].index(mo) + 1
         results = []
-        total_profit = 0.0
+        total_p = 0.0
         
         for t in TICKERS_20:
             df = get_market_data(t, f"{yr-1}-01-01")
             if df is not None:
                 m_data = df[(df.index.year == yr) & (df.index.month == m_idx)]
                 for date, row in m_data.iterrows():
+                    # Check if signal fired
                     if (row['Close'] > row['EMA200'] and row['ADX'] > 25 and 
                         40 <= row['RSI'] <= 60 and row['Is_Green'] and row['RVOL'] >= vol_threshold):
                         
+                        # Check if Low hit the 2% Stop
                         hit_stop = row['Low'] <= (row['Open'] * (1 - (stop_loss_pct/100)))
-                        hit_target = row['High'] >= (row['Open'] * (1 + (target_pct/100)))
                         
                         if hit_stop:
-                            p, status = -(stop_loss_pct + slippage), "❌ STOP OUT (-2%)"
-                        elif hit_target:
-                            p, status = (target_pct - slippage), "✅ WIN (+0.7%)"
+                            p = -(stop_loss_pct + slippage)
+                            status = "❌ STOP OUT (-2%)"
                         else:
-                            # SELL AT CLOSE
+                            # NO TARGET: Profit is determined at the Close
                             p = (((row['Close'] - row['Open']) / row['Open']) * 100) - slippage
-                            status = f"⏱️ SELL AT CLOSE ({p:.2f}%)"
+                            status = f"💰 CLOSE EXIT ({p:.2f}%)"
                         
-                        total_profit += p
-                        results.append({'Date': date.date(), 'Ticker': t, 'Status': status, 'Net %': round(p, 2)})
+                        total_p += p
+                        results.append({'Date': date.date(), 'Ticker': t, 'Status': status, 'Result %': round(p, 2)})
         
         if results:
-            res_df = pd.DataFrame(results)
-            st.metric("Total Monthly Profit", f"{total_profit:.2f}%")
-            st.dataframe(res_df, use_container_width=True)
+            st.metric("Total Monthly Performance", f"{total_p:.2f}%")
+            st.dataframe(pd.DataFrame(results), use_container_width=True)
