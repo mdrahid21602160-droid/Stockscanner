@@ -5,16 +5,15 @@ import pandas as pd
 from datetime import datetime
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Goldilocks Master Suite", layout="wide")
-st.title("🏹 Goldilocks Trading Master Suite")
+st.set_page_config(page_title="Goldilocks Profit Tracker", layout="wide")
+st.title("🏹 Goldilocks Trading: Monthly Profit Audit")
 
-# --- SIDEBAR: STRATEGY CONTROLS ---
+# --- SIDEBAR ---
 st.sidebar.header("⚙️ Strategy Parameters")
 target_pct = st.sidebar.slider("Profit Target (%)", 0.1, 1.0, 0.5, 0.1)
-vol_threshold = st.sidebar.slider("Min Relative Volume (RVOL)", 1.0, 2.5, 1.2, 0.1)
+vol_threshold = st.sidebar.slider("Min Relative Volume (RVOL)", 1.0, 2.5, 1.1, 0.1)
 gap_limit = 2.0 
 
-# --- THE EXPANDED WAR CHEST (60 TICKERS) ---
 TICKERS = [
     'AAPL', 'NVDA', 'MSFT', 'TSLA', 'AMZN', 'GOOGL', 'META', 'NFLX', 'ORCL', 'CRM', 'ADBE', 'IBM',
     'AMD', 'AVGO', 'SMCI', 'MU', 'QCOM', 'INTC', 'ARM', 'LRCX', 'ASML', 'ADI',
@@ -25,103 +24,99 @@ TICKERS = [
     'XOM', 'CVX', 'CAT', 'BA', 'GE'
 ]
 
-# --- DATA ENGINE ---
 @st.cache_data(ttl=3600)
-def get_war_chest_data(ticker, start_date):
+def get_clean_data(ticker, start_date):
     try:
         df = yf.download(ticker, start=start_date, progress=False, auto_adjust=True)
-        if df.empty: return None
+        if df is None or df.empty or len(df) < 200: return None
         if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+        
         df['EMA200'] = ta.ema(df['Close'], length=200)
         df['RSI'] = ta.rsi(df['Close'], length=14)
         adx_df = ta.adx(df['High'], df['Low'], df['Close'], length=14)
-        df['ADX'] = adx_df.iloc[:, 0]
+        df['ADX'] = adx_df.iloc[:, 0] if adx_df is not None else 0
         df['Avg_Vol'] = df['Volume'].rolling(window=10).mean()
         df['RVOL'] = df['Volume'] / df['Avg_Vol']
         df['Is_Green'] = df['Close'] > df['Open']
-        df['Gap'] = ((df['Open'] - df['Close'].shift(1)) / df['Close'].shift(1)) * 100
         return df
     except: return None
 
-# --- TABS ---
-tab1, tab2, tab3 = st.tabs(["🚀 Next Open Selector", "📊 Historical Audit (Backtest)", "💰 20-Year Growth"])
+tab1, tab2, tab3 = st.tabs(["🚀 Next Open Selector", "📊 Historical Audit", "💰 20-Year Growth"])
 
-# --- TAB 1: NEXT OPEN ---
+# --- TAB 1: LIVE SCAN ---
 with tab1:
-    st.header("🎯 Monday Morning Entry Signals")
-    if st.button("🔍 Scan 60 Tickers for Monday"):
+    st.header("🎯 Monday Morning Signals")
+    if st.button("🔍 Run Live Scan"):
         picks = []
-        spy = get_war_chest_data("SPY", "2025-01-01")
-        market_bullish = spy['Close'].iloc[-1] > spy['EMA200'].iloc[-1] if spy is not None else False
-        
-        if not market_bullish:
-            st.error("🚨 MARKET BEARISH: SPY < EMA200. No trades recommended.")
-        else:
-            with st.spinner(f"Scanning {len(TICKERS)} stocks..."):
-                for t in TICKERS:
-                    df = get_war_chest_data(t, "2025-01-01")
-                    if df is not None:
-                        row = df.iloc[-1]
-                        if (row['Close'] > row['EMA200'] and 40 <= row['RSI'] <= 60 and 
-                            row['ADX'] > 25 and row['RVOL'] >= vol_threshold and row['Is_Green']):
-                            picks.append({'Ticker': t, 'ADX': round(row['ADX'],1), 'RVOL': round(row['RVOL'],2), 'RSI': round(row['RSI'],1)})
-            
-            if picks:
-                recs = pd.DataFrame(picks).sort_values(by=['ADX', 'RVOL'], ascending=False)
-                st.success(f"Found {len(recs)} potential trades!")
-                st.dataframe(recs, use_container_width=True)
-            else:
-                st.warning("No tickers passed the filters. Try lowering RVOL in the sidebar.")
-
-# --- TAB 2: AUDIT / BACKTEST ---
-with tab2:
-    st.header("📋 Proof of Performance Audit")
-    c1, c2 = st.columns(2)
-    audit_year = c1.selectbox("Audit Year", range(2026, 2019, -1))
-    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    audit_month = c2.selectbox("Audit Month", months)
-    month_idx = months.index(audit_month) + 1
-
-    if st.button("📊 Run Monthly Backtest"):
-        audit_results = []
-        spy = get_war_chest_data("SPY", f"{audit_year-1}-01-01")
-        if spy is not None:
-            spy['MKT_BULL'] = spy['Close'] > spy['EMA200']
+        spy = get_clean_data("SPY", "2024-01-01")
+        if spy is not None and spy['Close'].iloc[-1] > spy['EMA200'].iloc[-1]:
             for t in TICKERS:
-                df = get_war_chest_data(t, f"{audit_year-1}-01-01")
+                df = get_clean_data(t, "2024-01-01")
                 if df is not None:
-                    df = df.join(spy[['MKT_BULL']], how='left')
-                    subset = df[(df.index.year == audit_year) & (df.index.month == month_idx)]
-                    for date, row in subset.iterrows():
-                        if (date.weekday() < 4 and row['MKT_BULL'] and row['Close'] > row['EMA200'] and 
-                            40 <= row['RSI'] <= 60 and row['ADX'] > 25 and 
-                            row['RVOL'] >= vol_threshold and row['Is_Green'] and abs(row['Gap']) < gap_limit):
-                            hit = row['High'] >= (row['Open'] * (1 + (target_pct/100)))
-                            audit_results.append({'Date': date.date(), 'Ticker': t, 'Status': "✅ WIN" if hit else "❌ FAIL"})
+                    row = df.iloc[-1]
+                    if (row['Close'] > row['EMA200'] and 40 <= row['RSI'] <= 60 and 
+                        row['ADX'] > 25 and row['RVOL'] >= vol_threshold and row['Is_Green']):
+                        picks.append({'Ticker': t, 'ADX': round(row['ADX'],1), 'RVOL': round(row['RVOL'],2), 'Price': round(row['Close'],2)})
+            if picks:
+                st.dataframe(pd.DataFrame(picks).sort_values('ADX', ascending=False), use_container_width=True)
+            else:
+                st.info("No matches found. Try lowering RVOL.")
+        else:
+            st.error("Market Filter: SPY is Bearish.")
+
+# --- TAB 2: AUDIT WITH PROFIT TRACKING ---
+with tab2:
+    st.header("📊 Monthly Profit Audit")
+    c1, c2 = st.columns(2)
+    audit_year = c1.selectbox("Year", [2026, 2025, 2024])
+    months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    audit_month = c2.selectbox("Month", months)
+    
+    if st.button("📈 Run Profit Backtest"):
+        m_idx = months.index(audit_month) + 1
+        results = []
+        total_monthly_gain = 0.0
+        
+        with st.spinner(f"Calculating profit for {audit_month}..."):
+            for t in TICKERS:
+                df = get_clean_data(t, f"{audit_year-1}-01-01")
+                if df is not None:
+                    m_data = df[(df.index.year == audit_year) & (df.index.month == m_idx)]
+                    for date, row in m_data.iterrows():
+                        if (row['Close'] > row['EMA200'] and row['ADX'] > 25 and 
+                            40 <= row['RSI'] <= 60 and row['Is_Green'] and row['RVOL'] >= vol_threshold):
+                            
+                            target_price = row['Open'] * (1 + (target_pct / 100))
+                            hit = row['High'] >= target_price
+                            
+                            trade_profit = target_pct if hit else 0.0
+                            total_monthly_gain += trade_profit
+                            
+                            results.append({
+                                'Date': date.date(), 
+                                'Ticker': t, 
+                                'Status': "✅ WIN" if hit else "❌ FAIL",
+                                'Profit (%)': f"+{trade_profit}%" if hit else "0.0%"
+                            })
             
-            if audit_results:
-                res_df = pd.DataFrame(audit_results)
-                win_count = len(res_df[res_df['Status'] == "✅ WIN"])
-                total_sigs = len(res_df)
-                win_rate = (win_count / total_sigs) * 100
+            if results:
+                res_df = pd.DataFrame(results)
+                win_rate = (len(res_df[res_df['Status'] == "✅ WIN"]) / len(res_df)) * 100
                 
+                # --- PROFIT METRICS ---
                 m1, m2, m3 = st.columns(3)
-                m1.metric("Signals Found", total_sigs)
-                m2.metric("Wins", win_count)
-                m3.metric("Win Rate", f"{win_rate:.1f}%")
+                m1.metric("Total Signals", len(res_df))
+                m2.metric("Win Rate", f"{win_rate:.1f}%")
+                m3.metric("Total Monthly Profit", f"+{total_monthly_gain:.2f}%", delta_color="normal")
+                
                 st.dataframe(res_df, use_container_width=True)
             else:
-                st.warning("No signals found in this period.")
+                st.warning("No setups found. Try lowering RVOL to 1.0.")
 
-# --- TAB 3: COMPOUNDING ---
+# --- TAB 3: GROWTH ---
 with tab3:
     st.header("💰 20-Year Growth Projection")
-    initial_inv = st.number_input("Starting Capital ($)", value=1000)
-    avg_wins_mo = st.slider("Successful Trades Per Month", 1, 25, 15)
-    
-    months_total = 20 * 12
-    monthly_rate = (target_pct / 100) * avg_wins_mo
-    final_val = initial_inv * ((1 + monthly_rate) ** months_total)
-    
-    st.metric("Estimated Final Balance", f"${final_val:,.2f}")
-    st.write(f"This assumes you hit your **{target_pct}%** target **{avg_wins_mo} times** a month for 20 years.")
+    init = st.number_input("Starting Capital", value=1000)
+    wins = st.slider("Total Monthly Profit Target (%)", 1.0, 20.0, 7.5) # Based on Tab 2 results
+    final = init * ((1 + (wins/100)) ** 240)
+    st.metric("20-Year Outcome", f"${final:,.2f}")
