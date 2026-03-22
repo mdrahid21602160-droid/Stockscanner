@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas_ta as ta
 import pandas as pd
-import numpy as np
 from datetime import datetime
 
 # --- PAGE CONFIG ---
@@ -14,7 +13,7 @@ st.sidebar.header("⚙️ Strategy Parameters")
 target_pct = st.sidebar.slider("Profit Target (%)", 0.1, 1.0, 0.7, 0.1)
 stop_loss_pct = st.sidebar.slider("Stop Loss (%)", 0.5, 3.0, 1.0, 0.1)
 vol_threshold = st.sidebar.slider("Min RVOL", 1.0, 2.5, 1.1, 0.1)
-slippage = 0.05 # Conservative estimate per trade
+slippage = 0.05 
 
 TICKERS = [
     'AAPL', 'NVDA', 'MSFT', 'TSLA', 'AMZN', 'GOOGL', 'META', 'NFLX', 'ORCL', 'CRM', 'ADBE', 'IBM',
@@ -61,12 +60,12 @@ with tab1:
                         picks.append({'Ticker': t, 'ADX': round(row['ADX'],1), 'RVOL': round(row['RVOL'],2)})
             if picks:
                 st.dataframe(pd.DataFrame(picks).sort_values('ADX', ascending=False), use_container_width=True)
-            else: st.info("No stocks met the criteria. Try lowering RVOL.")
+            else: st.info("No stocks met the criteria today.")
         else: st.error("Market Bearish: SPY < EMA200.")
 
-# --- TAB 2: REALITY AUDIT (WITH STOP LOSS) ---
+# --- TAB 2: REALITY AUDIT ---
 with tab2:
-    st.header("📋 The "Real" Backtest")
+    st.header("📋 The Reality Backtest") # Fixed the quote syntax error here
     c1, c2 = st.columns(2)
     yr = c1.selectbox("Year", [2026, 2025, 2024])
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -86,8 +85,8 @@ with tab2:
                         if (row['Close'] > row['EMA200'] and row['ADX'] > 25 and 
                             40 <= row['RSI'] <= 60 and row['Is_Green'] and row['RVOL'] >= vol_threshold):
                             
-                            # LOGIC: Did we hit Target or Stop Loss?
-                            # We check Low first (Conservative) to see if we got Stopped Out
+                            # Logic: Did we hit Stop Loss or Target? 
+                            # We check Low first (Conservative)
                             hit_stop = row['Low'] <= (row['Open'] * (1 - (stop_loss_pct/100)))
                             hit_target = row['High'] >= (row['Open'] * (1 + (target_pct/100)))
                             
@@ -96,7 +95,7 @@ with tab2:
                             elif hit_target:
                                 status, p = "✅ WIN", (target_pct - slippage)
                             else:
-                                # Exit at Close if neither hit
+                                # Exit at Close if nothing hit
                                 p = ((row['Close'] - row['Open']) / row['Open'] * 100) - slippage
                                 status = "✅ CLOSE WIN" if p > 0 else "❌ CLOSE LOSS"
                             
@@ -112,12 +111,11 @@ with tab2:
                 m2.metric("Real Win Rate", f"{win_rate:.1f}%")
                 m3.metric("Total Monthly Profit", f"{total_profit:.2f}%")
                 st.dataframe(res_df, use_container_width=True)
-            else: st.warning("No signals found.")
+            else: st.warning("No signals found for this period.")
 
 # --- TAB 3: COMPOUNDING ---
 with tab3:
     st.header("💰 20-Year Growth")
     init = st.number_input("Start $", value=1000)
-    mo_avg = st.slider("Monthly Profit Avg (%)", 1.0, 20.0, 5.0)
-    final = init * ((1 + (mo_avg/100)) ** 240)
-    st.metric("Future Balance", f"${final:,.2f}")
+    # Using a realistic monthly profit based on your backtest results
+    mo_avg = st.slider("
