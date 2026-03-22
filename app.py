@@ -2,7 +2,6 @@ import streamlit as st
 import yfinance as yf
 import pandas_ta as ta
 import pandas as pd
-from datetime import datetime
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Goldilocks Reality Suite", layout="wide")
@@ -49,10 +48,10 @@ with tab1:
     st.header("🎯 Monday Morning Signals")
     if st.button("🔍 Scan 60 Tickers"):
         picks = []
-        spy = get_market_data("SPY", "2024-01-01")
+        spy = get_market_data("SPY", "2025-01-01")
         if spy is not None and spy['Close'].iloc[-1] > spy['EMA200'].iloc[-1]:
             for t in TICKERS:
-                df = get_market_data(t, "2024-01-01")
+                df = get_market_data(t, "2025-01-01")
                 if df is not None:
                     row = df.iloc[-1]
                     if (row['Close'] > row['EMA200'] and 40 <= row['RSI'] <= 60 and 
@@ -65,7 +64,7 @@ with tab1:
 
 # --- TAB 2: REALITY AUDIT ---
 with tab2:
-    st.header("📋 The Reality Backtest") # Fixed the quote syntax error here
+    st.header("📋 The Reality Backtest")
     c1, c2 = st.columns(2)
     yr = c1.selectbox("Year", [2026, 2025, 2024])
     months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -85,8 +84,7 @@ with tab2:
                         if (row['Close'] > row['EMA200'] and row['ADX'] > 25 and 
                             40 <= row['RSI'] <= 60 and row['Is_Green'] and row['RVOL'] >= vol_threshold):
                             
-                            # Logic: Did we hit Stop Loss or Target? 
-                            # We check Low first (Conservative)
+                            # Logic: Stop Loss vs Target
                             hit_stop = row['Low'] <= (row['Open'] * (1 - (stop_loss_pct/100)))
                             hit_target = row['High'] >= (row['Open'] * (1 + (target_pct/100)))
                             
@@ -95,8 +93,8 @@ with tab2:
                             elif hit_target:
                                 status, p = "✅ WIN", (target_pct - slippage)
                             else:
-                                # Exit at Close if nothing hit
-                                p = ((row['Close'] - row['Open']) / row['Open'] * 100) - slippage
+                                # Exit at market close if neither hit
+                                p = (((row['Close'] - row['Open']) / row['Open']) * 100) - slippage
                                 status = "✅ CLOSE WIN" if p > 0 else "❌ CLOSE LOSS"
                             
                             total_profit += p
@@ -104,7 +102,8 @@ with tab2:
             
             if results:
                 res_df = pd.DataFrame(results)
-                win_rate = (len(res_df[res_df['Status'].str.contains("WIN")]) / len(res_df)) * 100
+                win_count = len(res_df[res_df['Status'].str.contains("WIN")])
+                win_rate = (win_count / len(res_df)) * 100
                 
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Total Trades", len(res_df))
@@ -116,6 +115,8 @@ with tab2:
 # --- TAB 3: COMPOUNDING ---
 with tab3:
     st.header("💰 20-Year Growth")
-    init = st.number_input("Start $", value=1000)
-    # Using a realistic monthly profit based on your backtest results
-    mo_avg = st.slider("
+    init = st.number_input("Starting Capital ($)", value=1000)
+    mo_avg = st.slider("Monthly Profit Avg (%)", 0.5, 20.0, 5.0)
+    final_val = init * ((1 + (mo_avg/100)) ** 240)
+    st.metric("Estimated Future Balance", f"${final_val:,.2f}")
+    st.write("Calculated over 240 months (20 years).")
