@@ -10,15 +10,22 @@ st.title("🏹 Goldilocks Trading Master Suite")
 
 # --- SIDEBAR: STRATEGY CONTROLS ---
 st.sidebar.header("⚙️ Strategy Parameters")
-target_pct = st.sidebar.slider("Profit Target (%)", 0.1, 1.0, 0.3, 0.1)
+target_pct = st.sidebar.slider("Profit Target (%)", 0.1, 1.0, 0.5, 0.1)
 vol_threshold = st.sidebar.slider("Min Relative Volume (RVOL)", 1.0, 2.5, 1.2, 0.1)
 gap_limit = 2.0 
 
-TICKERS = ['AAPL', 'NVDA', 'MSFT', 'TSLA', 'AMZN', 'GOOGL', 'META', 'NFLX', 
-           'AMD', 'AVGO', 'COST', 'SMCI', 'MSTR', 'QCOM', 'ORCL', 'INTU', 
-           'ADBE', 'CRM', 'ISRG', 'MU']
+# --- THE EXPANDED WAR CHEST (60 TICKERS) ---
+TICKERS = [
+    'AAPL', 'NVDA', 'MSFT', 'TSLA', 'AMZN', 'GOOGL', 'META', 'NFLX', 'ORCL', 'CRM', 'ADBE', 'IBM',
+    'AMD', 'AVGO', 'SMCI', 'MU', 'QCOM', 'INTC', 'ARM', 'LRCX', 'ASML', 'ADI',
+    'PYPL', 'V', 'MA', 'SQ', 'COIN', 'JPM', 'BAC', 'GS', 'MS', 'HOOD',
+    'MSTR', 'PLTR', 'SNOW', 'PATH', 'U', 'RBLX', 'SHOP', 'NET', 'TSM',
+    'COST', 'WMT', 'TGT', 'NKE', 'SBUX', 'LULU', 'CMG', 'BKNG',
+    'LLY', 'UNH', 'PFE', 'ABBV', 'MRNA', 'ISRG',
+    'XOM', 'CVX', 'CAT', 'BA', 'GE'
+]
 
-# --- SHARED DATA ENGINE ---
+# --- DATA ENGINE ---
 @st.cache_data(ttl=3600)
 def get_war_chest_data(ticker, start_date):
     try:
@@ -39,38 +46,36 @@ def get_war_chest_data(ticker, start_date):
     except: return None
 
 # --- TABS ---
-tab1, tab2, tab3 = st.tabs(["🚀 Next Open Selector", "📊 Historical Audit (Backtest)", "📈 20-Year Growth"])
+tab1, tab2, tab3 = st.tabs(["🚀 Next Open Selector", "📊 Historical Audit (Backtest)", "💰 20-Year Growth"])
 
 # --- TAB 1: NEXT OPEN ---
 with tab1:
     st.header("🎯 Monday Morning Entry Signals")
-    st.info("Uses Friday's closing data to find high-probability Monday entries.")
-    
-    if st.button("🔍 Run Next Open Scan"):
+    if st.button("🔍 Scan 60 Tickers for Monday"):
         picks = []
         spy = get_war_chest_data("SPY", "2025-01-01")
         market_bullish = spy['Close'].iloc[-1] > spy['EMA200'].iloc[-1] if spy is not None else False
         
         if not market_bullish:
-            st.error("🚨 MARKET FILTER: BEARISH. SPY is below EMA200.")
+            st.error("🚨 MARKET BEARISH: SPY < EMA200. No trades recommended.")
         else:
-            for t in TICKERS:
-                df = get_war_chest_data(t, "2025-01-01")
-                if df is not None:
-                    row = df.iloc[-1]
-                    if (row['Close'] > row['EMA200'] and 40 <= row['RSI'] <= 60 and 
-                        row['ADX'] > 25 and row['RVOL'] >= vol_threshold and row['Is_Green']):
-                        picks.append({'Ticker': t, 'ADX': round(row['ADX'],1), 'RVOL': round(row['RVOL'],2), 'RSI': round(row['RSI'],1), 'Dist': abs(row['RSI']-50)})
+            with st.spinner(f"Scanning {len(TICKERS)} stocks..."):
+                for t in TICKERS:
+                    df = get_war_chest_data(t, "2025-01-01")
+                    if df is not None:
+                        row = df.iloc[-1]
+                        if (row['Close'] > row['EMA200'] and 40 <= row['RSI'] <= 60 and 
+                            row['ADX'] > 25 and row['RVOL'] >= vol_threshold and row['Is_Green']):
+                            picks.append({'Ticker': t, 'ADX': round(row['ADX'],1), 'RVOL': round(row['RVOL'],2), 'RSI': round(row['RSI'],1)})
             
             if picks:
-                recs = pd.DataFrame(picks).sort_values(by=['ADX', 'RVOL'], ascending=False).head(3)
-                cols = st.columns(3)
-                for i, (_, r) in enumerate(recs.iterrows()):
-                    cols[i].success(f"**Pick #{i+1}: {r['Ticker']}**\n\nADX: {r['ADX']}\nRVOL: {r['RVOL']}x")
+                recs = pd.DataFrame(picks).sort_values(by=['ADX', 'RVOL'], ascending=False)
+                st.success(f"Found {len(recs)} potential trades!")
+                st.dataframe(recs, use_container_width=True)
             else:
-                st.warning("No tickers passed the strict volume/candle filters today.")
+                st.warning("No tickers passed the filters. Try lowering RVOL in the sidebar.")
 
-# --- TAB 2: AUDIT / BACKTEST (MONTH & YEAR SELECTION) ---
+# --- TAB 2: AUDIT / BACKTEST ---
 with tab2:
     st.header("📋 Proof of Performance Audit")
     c1, c2 = st.columns(2)
@@ -107,8 +112,8 @@ with tab2:
 # --- TAB 3: COMPOUNDING ---
 with tab3:
     st.header("💰 20-Year Growth Projection")
-    initial_inv = st.number_input("Starting Capital ($)", value=10000)
-    avg_wins_mo = st.slider("Successful Trades Per Month", 1, 15, 5)
+    initial_inv = st.number_input("Starting Capital ($)", value=1000)
+    avg_wins_mo = st.slider("Successful Trades Per Month", 1, 20, 15)
     
     months_total = 20 * 12
     monthly_rate = (target_pct / 100) * avg_wins_mo
